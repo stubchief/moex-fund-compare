@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: raw_sources
+    schema: raw
+    tables:
+      - name: fund_info
+      - name: fund_prices
+      - name: index_prices
+      - name: cbr_macro

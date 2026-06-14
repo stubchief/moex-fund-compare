@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: stg_fund_info
+    description: "Sanitized registry of MOEX funds"
+    columns:
+      - name: fund_ticker
+        description: "Primary key: unique identifier of the fund"
+        tests:
+          - not_null
+          - unique # Ensures no duplicate funds exist in staging
+
+  - name: stg_fund_prices
+    description: "Clean daily closing prices and volumes for funds"
+    columns:
+      - name: fund_ticker
+        tests:
+          - not_null
+          # Foreign key test: checks if ticker exists in our fund registry
+          - relationships:
+              to: ref('stg_fund_info')
+              field: fund_ticker
+
+      - name: trade_date
+        tests:
+          - not_null
+
+      - name: close_price
+        tests:
+          - not_null
+
+  - name: stg_cbr_macro
+    description: "Clean historical CBR macro data (inflation and key rate)"
+    columns:
+      - name: report_month
+        tests:
+          - not_null
+          - unique # Ensures we have exactly one macro record per month
