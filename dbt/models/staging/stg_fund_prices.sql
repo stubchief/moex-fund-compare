@@ -2,6 +2,7 @@
 
 with source as (
     select * from {{ source('raw_sources', 'fund_prices') }}
+    where close is not null
 ),
 
 renamed as (
