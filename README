@@ -1,0 +1,10 @@
+# apply schema
+psql postgres://etf:etf@localhost:5432/etf -f infra/sql/raw_schema.sql
+
+# lauch ingestion
+DATABASE_URL=postgres://etf:etf@localhost:5432/etf \
+    python ingestion/cbr.py inflation --from-date 2024-01-01
+
+# check table contents
+psql postgres://etf:etf@localhost:5432/etf \
+    -c "SELECT * FROM raw.inflation ORDER BY period LIMIT 10;"
