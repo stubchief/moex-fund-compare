@@ -78,7 +78,7 @@ joined as (
         round(((i.index_end - i.index_start) / i.index_start), 4) as index_return,
         
         -- Inflation rate from CBR (converted to decimal format)
-        round(coalesce(m.inflation_rate, 0) / 100.0, 4) as monthly_inflation,
+        round(power(1 + m.inflation_rate / 100.0, 1.0/12) - 1, 4) as monthly_inflation,
         
         m.key_rate,
         v.total_monthly_volume_rub

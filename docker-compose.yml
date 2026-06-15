@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Common configuration shared across all Airflow services
 x-airflow-common: &airflow-common
   build:
@@ -67,6 +65,18 @@ services:
     <<: *airflow-common
     command: scheduler
     restart: always
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/etf_db
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:

@@ -1,7 +1,7 @@
 """
 ingestion/cbr.py
 
-Fetches monthly macroeconomic data (Inflation YoY and Key Rate) 
+Fetches monthly macroeconomic data (Inflation YoY and Key Rate)
 from the CBR SOAP Web Service and writes it to the raw schema in PostgreSQL.
 
 One public function:
@@ -33,7 +33,6 @@ SOAP_ACTION = "http://web.cbr.ru/InflationXML"
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 
-# SOAP XML Template
 SOAP_BODY_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
@@ -46,10 +45,11 @@ SOAP_BODY_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 
 
 # ---------------------------------------------------------------------------
-# HTTP & DB Clients
+# HTTP & DB clients
 # ---------------------------------------------------------------------------
+
 def _post_soap(from_date: str, to_date: str) -> str:
-    """Sends a POST request to CBR SOAP API with retries. Returns raw text."""
+    """Sends a POST request to CBR SOAP API with retries. Returns raw XML text."""
     body = SOAP_BODY_TEMPLATE.format(from_date=from_date, to_date=to_date)
     headers = {
         "Content-Type": "text/xml; charset=utf-8",
@@ -58,12 +58,14 @@ def _post_soap(from_date: str, to_date: str) -> str:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = requests.post(SOAP_URL, data=body.encode("utf-8"), headers=headers, timeout=30)
+            response = requests.post(
+                SOAP_URL, data=body.encode("utf-8"), headers=headers, timeout=30
+            )
             response.raise_for_status()
             response.encoding = "utf-8"
             return response.text
         except requests.RequestException as e:
-            logger.warning("Attempt %d/%d failed for SOAP API: %s", attempt, MAX_RETRIES, e)
+            logger.warning("Attempt %d/%d failed: %s", attempt, MAX_RETRIES, e)
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_DELAY)
             else:
@@ -75,24 +77,34 @@ def _get_connection():
 
 
 def _normalize_period(dts_str: str) -> str:
-    """Converts 'MM.YYYY' (e.g., '01.2024') to standard ISO date 'YYYY-MM-01'."""
+    """Converts 'MM.YYYY' (e.g. '01.2024') to ISO date 'YYYY-MM-01'."""
     month, year = dts_str.split(".")
     return f"{year}-{month}-01"
 
 
 # ---------------------------------------------------------------------------
-# Core Ingestion Function
+# Core ingestion function
 # ---------------------------------------------------------------------------
-def fetch_cbr_macro(from_date: str = "2018-01-01", to_date: Optional[str] = None) -> int:
+
+def fetch_cbr_macro(
+    from_date: str = "2018-01-01",
+    to_date: Optional[str] = None,
+) -> int:
     """
     Fetches monthly Key Rate, Inflation (YoY), and Target Inflation from CBR.
 
+    infVal is year-over-year annual inflation (%), e.g. 7.44 = +7.44% vs same
+    month last year. This is the standard Rosstat CPI series as published by CBR.
+
+    No pagination - CBR returns the full date range in one response.
+    Duplicates from re-runs are handled in dbt staging.
+
     Args:
-        from_date: Start date in 'YYYY-MM-DD' format.
-        to_date:   End date in 'YYYY-MM-DD' format. Defaults to today.
+        from_date: Start date 'YYYY-MM-DD'. Defaults to '2018-01-01'.
+        to_date:   End date 'YYYY-MM-DD'. Defaults to today.
 
     Returns:
-        Number of rows written to the database.
+        Number of rows written.
     """
     if to_date is None:
         to_date = str(date.today())
@@ -106,41 +118,35 @@ def fetch_cbr_macro(from_date: str = "2018-01-01", to_date: Optional[str] = None
         logger.error("Failed to parse SOAP XML response: %s", e)
         raise
 
-    # Namespace mapping for SOAP parsing
     namespaces = {
         "soap": "http://schemas.xmlsoap.org/soap/envelope/",
-        "cbr": "http://web.cbr.ru/"
+        "cbr":  "http://web.cbr.ru/",
     }
 
-    # Find the container <InflationXMLResult> inside SOAP Envelope
-    # The elements inside <InflationXMLResult> (<Infl> -> <RI>) don't have a namespace prefix in response
     result_node = root.find(".//cbr:InflationXMLResult", namespaces)
     if result_node is None:
         logger.warning("InflationXMLResult node not found in response")
         return 0
 
     records = []
-    # Iterate through all <RI> elements inside <Infl>
     for ri in result_node.findall(".//RI"):
-        dts = ri.find("DTS")
+        dts      = ri.find("DTS")
         key_rate = ri.find("KeyRate")
-        inf_val = ri.find("infVal")
-        aim_val = ri.find("AimVal")
+        inf_val  = ri.find("infVal")
+        aim_val  = ri.find("AimVal")
 
         if dts is None or dts.text is None:
             continue
 
-        period = _normalize_period(dts.text.strip())
-        
         records.append((
-            period,
+            _normalize_period(dts.text.strip()),
             key_rate.text.strip() if key_rate is not None and key_rate.text else None,
-            inf_val.text.strip() if inf_val is not None and inf_val.text else None,
-            aim_val.text.strip() if aim_val is not None and aim_val.text else None,
+            inf_val.text.strip()  if inf_val  is not None and inf_val.text  else None,
+            aim_val.text.strip()  if aim_val  is not None and aim_val.text  else None,
         ))
 
     if not records:
-        logger.warning("cbr_macro: No records extracted from the response")
+        logger.warning("cbr_macro: no records extracted from response")
         return 0
 
     with _get_connection() as conn:
@@ -155,13 +161,14 @@ def fetch_cbr_macro(from_date: str = "2018-01-01", to_date: Optional[str] = None
             )
         conn.commit()
 
-    logger.info("cbr_macro: successfully wrote %d rows", len(records))
+    logger.info("cbr_macro: wrote %d rows", len(records))
     return len(records)
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# CLI - for local testing and manual backfills
 # ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     import argparse
 
@@ -170,12 +177,12 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="CBR SOAP Ingestion CLI")
+    parser = argparse.ArgumentParser(description="CBR SOAP ingestion")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    p_macro = subparsers.add_parser("macro", help="Load monthly macro indicators (Inflation & Key Rate)")
-    p_macro.add_argument("--from-date", default="2018-01-01")
-    p_macro.add_argument("--to-date", default=None)
+    p = subparsers.add_parser("macro", help="Load monthly macro indicators (Inflation & Key Rate)")
+    p.add_argument("--from-date", default="2018-01-01")
+    p.add_argument("--to-date", default=None)
 
     args = parser.parse_args()
 

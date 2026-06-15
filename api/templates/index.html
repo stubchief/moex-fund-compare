@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOEX ETF Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0f1e;
+            color: #c8d6e8;
+            min-height: 100vh;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Grid lines background */
+        .grid-bg {
+            background-image:
+                linear-gradient(rgba(99, 179, 237, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 179, 237, 0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        .card {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(99, 179, 237, 0.12);
+            border-radius: 8px;
+            backdrop-filter: blur(8px);
+        }
+
+        .accent {
+            color: #63b3ed;
+        }
+
+        .accent-green {
+            color: #68d391;
+        }
+
+        .accent-red {
+            color: #fc8181;
+        }
+
+        .btn {
+            background: rgba(99, 179, 237, 0.1);
+            border: 1px solid rgba(99, 179, 237, 0.25);
+            color: #63b3ed;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .btn:hover {
+            background: rgba(99, 179, 237, 0.2);
+            border-color: rgba(99, 179, 237, 0.5);
+        }
+
+        .btn.active {
+            background: rgba(99, 179, 237, 0.25);
+            border-color: #63b3ed;
+            color: #fff;
+        }
+
+        .period-btn {
+            background: transparent;
+            border: none;
+            color: #718096;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.15s;
+        }
+
+        .period-btn:hover {
+            color: #63b3ed;
+        }
+
+        .period-btn.active {
+            color: #63b3ed;
+            background: rgba(99, 179, 237, 0.1);
+        }
+
+        .ticker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(99, 179, 237, 0.08);
+            border: 1px solid rgba(99, 179, 237, 0.2);
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #a0b4c8;
+        }
+
+        .ticker-chip .remove {
+            cursor: pointer;
+            color: #718096;
+            line-height: 1;
+            font-size: 14px;
+        }
+
+        .ticker-chip .remove:hover {
+            color: #fc8181;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="date"] {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(99, 179, 237, 0.15);
+            border-radius: 4px;
+            color: #c8d6e8;
+            padding: 6px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        input:focus {
+            border-color: rgba(99, 179, 237, 0.4);
+        }
+
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(0.6) sepia(1) saturate(2) hue-rotate(180deg);
+            cursor: pointer;
+            opacity: 0.7;
+        }
+
+        input[type="date"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
+
+        .autocomplete-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #0d1a2e;
+            border: 1px solid rgba(99, 179, 237, 0.2);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        .autocomplete-item {
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .autocomplete-item:hover {
+            background: rgba(99, 179, 237, 0.08);
+        }
+
+        .autocomplete-item .name {
+            color: #718096;
+            font-size: 11px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 22px;
+            font-weight: 500;
+            line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-top: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th {
+            color: #718096;
+            font-weight: 400;
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(99, 179, 237, 0.08);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        td {
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(99, 179, 237, 0.05);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(99, 179, 237, 0.03);
+        }
+
+        .positive {
+            color: #68d391;
+        }
+
+        .negative {
+            color: #fc8181;
+        }
+
+        .loading {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(99, 179, 237, 0.2);
+            border-radius: 2px;
+        }
+    </style>
+</head>
+
+<body class="grid-bg">
+
+    <!-- Header -->
+    <header
+        style="border-bottom: 1px solid rgba(99,179,237,0.08); padding: 16px 32px; display: flex; align-items: center; gap: 16px;">
+        <div>
+            <div
+                style="font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px;">
+                MOEX</div>
+            <div style="font-size: 18px; font-weight: 500; color: #e2eaf4;">ETF Dashboard</div>
+        </div>
+        <div style="flex: 1;"></div>
+        <div id="header-stats"
+            style="display: flex; gap: 32px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #718096;">
+        </div>
+    </header>
+
+    <main style="padding: 24px 32px; max-width: 1400px; margin: 0 auto;">
+
+        <!-- Controls row -->
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+
+            <!-- Period buttons -->
+            <div class="card" style="padding: 4px 6px; display: flex; gap: 2px;">
+                <button class="period-btn active" data-months="3">3М</button>
+                <button class="period-btn" data-months="6">6М</button>
+                <button class="period-btn" data-months="12">1Г</button>
+                <button class="period-btn" data-months="36">3Г</button>
+                <button class="period-btn" data-months="0">Всё</button>
+            </div>
+
+            <!-- Ticker search -->
+            <div style="position: relative;">
+                <input type="text" id="ticker-search" placeholder="Добавить фонд..." style="width: 200px;">
+                <div id="autocomplete" class="autocomplete-list" style="display:none;"></div>
+            </div>
+
+            <!-- Active tickers -->
+            <div id="ticker-chips" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+
+            <div style="flex:1;"></div>
+
+            <!-- Toggle options -->
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#718096; cursor:pointer;">
+                <input type="checkbox" id="show-index" checked style="accent-color: #63b3ed;">
+                IMOEX
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#718096; cursor:pointer;">
+                <input type="checkbox" id="show-inflation" checked style="accent-color: #f6ad55;">
+                Инфляция
+            </label>
+        </div>
+
+        <!-- Chart -->
+        <div class="card" style="padding: 20px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div style="font-size: 13px; color: #718096;">Номинальная доходность, % в месяц</div>
+            </div>
+            <div style="height: 320px;">
+                <canvas id="performance-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Bottom row: table + calculator -->
+        <div style="display: grid; grid-template-columns: 1fr 380px; gap: 20px;">
+
+            <!-- Rankings table -->
+            <div class="card" style="padding: 0; overflow: hidden;">
+                <div
+                    style="padding: 16px 20px; border-bottom: 1px solid rgba(99,179,237,0.08); font-size: 13px; color: #718096;">
+                    Топ фондов за период
+                </div>
+                <div id="rankings-table"></div>
+            </div>
+
+            <!-- Calculator -->
+            <div class="card" style="padding: 20px;">
+                <div style="font-size: 13px; color: #718096; margin-bottom: 16px;">Калькулятор доходности</div>
+
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <div>
+                        <div
+                            style="font-size: 11px; color: #718096; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em;">
+                            Фонд</div>
+                        <input type="text" id="calc-ticker" placeholder="SBMX" style="width: 100%;">
+                    </div>
+                    <div>
+                        <div
+                            style="font-size: 11px; color: #718096; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em;">
+                            Сумма (₽)</div>
+                        <input type="number" id="calc-amount" value="100000" style="width: 100%;">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div>
+                            <div
+                                style="font-size: 11px; color: #718096; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em;">
+                                С</div>
+                            <input type="date" id="calc-from" style="width: 100%;">
+                        </div>
+                        <div>
+                            <div
+                                style="font-size: 11px; color: #718096; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em;">
+                                По</div>
+                            <input type="date" id="calc-to" style="width: 100%;">
+                        </div>
+                    </div>
+                    <button class="btn" id="calc-btn" style="width: 100%; margin-top: 4px;">Рассчитать</button>
+                </div>
+
+                <div id="calc-result" style="margin-top: 16px; display: none;">
+                    <div
+                        style="border-top: 1px solid rgba(99,179,237,0.08); padding-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div>
+                            <div class="stat-value" id="result-nominal"></div>
+                            <div class="stat-label">Номинально</div>
+                            <div style="font-size: 11px; color: #718096; margin-top: 4px;" id="result-nominal-pct">
+                            </div>
+                        </div>
+                        <div>
+                            <div class="stat-value" id="result-real"></div>
+                            <div class="stat-label">Реально (с инфляцией)</div>
+                            <div style="font-size: 11px; color: #718096; margin-top: 4px;" id="result-real-pct"></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px; font-size: 11px; color: #718096;" id="result-meta"></div>
+                </div>
+
+                <div id="calc-error" style="display:none; margin-top: 12px; font-size: 12px; color: #fc8181;"></div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // ---------------------------------------------------------------------------
+        // State
+        // ---------------------------------------------------------------------------
+        let allFunds = [];
+        let activeTickers = [];
+        let currentMonths = 3;
+        let chart = null;
+
+        const COLORS = [
+            '#63b3ed', '#68d391', '#f6ad55', '#fc8181', '#b794f4',
+            '#76e4f7', '#faf089', '#f687b3', '#9ae6b4', '#90cdf4',
+        ];
+
+        // ---------------------------------------------------------------------------
+        // Init
+        // ---------------------------------------------------------------------------
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadFunds();
+            setupPeriodButtons();
+            setupSearch();
+            setupCalculator();
+            await loadTopFunds(currentMonths);
+        });
+
+        // ---------------------------------------------------------------------------
+        // Load fund reference list
+        // ---------------------------------------------------------------------------
+        async function loadFunds() {
+            const res = await fetch('/api/funds');
+            allFunds = await res.json();
+        }
+
+        // ---------------------------------------------------------------------------
+        // Period buttons
+        // ---------------------------------------------------------------------------
+        function setupPeriodButtons() {
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentMonths = parseInt(btn.dataset.months);
+
+                    await loadTopFunds(currentMonths);
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------------------
+        // Top funds: load and render
+        // ---------------------------------------------------------------------------
+        async function loadTopFunds(months) {
+            const params = new URLSearchParams({ months: months || 12, limit: 10 });
+            const res = await fetch(`/api/top-funds?${params}`);
+            const data = await res.json();
+
+            // On first load set default tickers; on period change keep current selection
+            if (activeTickers.length === 0) {
+                activeTickers = data.slice(0, 5).map(f => f.fund_ticker);
+                renderChips();
+            }
+            renderRankingsTable(data);
+            await refreshChart();
+        }
+
+        // ---------------------------------------------------------------------------
+        // Chart
+        // ---------------------------------------------------------------------------
+        async function refreshChart() {
+            if (activeTickers.length === 0) return;
+
+            const params = new URLSearchParams({ tickers: activeTickers.join(',') });
+            if (currentMonths > 0) {
+                const from = new Date();
+                from.setMonth(from.getMonth() - currentMonths);
+                params.set('from', from.toISOString().slice(0, 10));
+            }
+
+            const res = await fetch(`/api/performance?${params}`);
+            const data = await res.json();
+
+            // Build cumulative return series per ticker
+            const months = [...new Set(data.funds.map(r => r.report_month))].sort();
+
+            const datasets = [];
+            const showIndex = document.getElementById('show-index').checked;
+
+            activeTickers.forEach((ticker, i) => {
+                const rows = data.funds.filter(r => r.fund_ticker === ticker);
+                const rowMap = Object.fromEntries(rows.map(r => [r.report_month, r]));
+
+                let cumulative = 1;
+                const values = months.map(m => {
+                    const r = rowMap[m];
+                    if (r && r.nominal_return !== null) {
+                        cumulative *= (1 + parseFloat(r.nominal_return));
+                    }
+                    return +((cumulative - 1) * 100).toFixed(2);
+                });
+
+                datasets.push({
+                    label: ticker,
+                    data: values,
+                    borderColor: COLORS[i % COLORS.length],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.3,
+                });
+            });
+
+            const idxMap = Object.fromEntries(data.index.map(r => [r.report_month, r]));
+
+            // IMOEX line
+            if (showIndex && data.index.length > 0) {
+                let cumulative = 1;
+                const values = months.map(m => {
+                    const r = idxMap[m];
+                    if (r && r.index_return !== null) cumulative *= (1 + parseFloat(r.index_return));
+                    return +((cumulative - 1) * 100).toFixed(2);
+                });
+                datasets.push({
+                    label: 'IMOEX',
+                    data: values,
+                    borderColor: 'rgba(255,255,255,0.25)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderDash: [4, 3],
+                    pointRadius: 0,
+                    tension: 0.3,
+                });
+            }
+
+            // Inflation cumulative line
+            const showInflation = document.getElementById('show-inflation').checked;
+            if (showInflation && data.index.length > 0) {
+                let cumulative = 1;
+                const values = months.map(m => {
+                    const r = idxMap[m];
+                    if (r && r.monthly_inflation !== null) cumulative *= (1 + parseFloat(r.monthly_inflation));
+                    return +((cumulative - 1) * 100).toFixed(2);
+                });
+                datasets.push({
+                    label: 'Инфляция',
+                    data: values,
+                    borderColor: '#f6ad55',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderDash: [2, 4],
+                    pointRadius: 0,
+                    tension: 0.3,
+                });
+            }
+
+            const labels = months.map(m => m.slice(0, 7));
+
+            if (chart) {
+                chart.data.labels = labels;
+                chart.data.datasets = datasets;
+                chart.update('none');
+            } else {
+                const ctx = document.getElementById('performance-chart').getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                align: 'start',
+                                labels: {
+                                    color: '#718096',
+                                    font: { family: 'JetBrains Mono', size: 11 },
+                                    boxWidth: 12,
+                                    padding: 16,
+                                    usePointStyle: true,
+                                },
+                            },
+                            tooltip: {
+                                backgroundColor: 'rgba(10,15,30,0.95)',
+                                borderColor: 'rgba(99,179,237,0.2)',
+                                borderWidth: 1,
+                                titleColor: '#c8d6e8',
+                                bodyColor: '#718096',
+                                titleFont: { family: 'JetBrains Mono', size: 11 },
+                                bodyFont: { family: 'JetBrains Mono', size: 11 },
+                                callbacks: {
+                                    label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y > 0 ? '+' : ''}${ctx.parsed.y}%`
+                                }
+                            },
+                        },
+                        scales: {
+                            x: {
+                                ticks: { color: '#4a5568', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
+                                grid: { color: 'rgba(99,179,237,0.04)' },
+                            },
+                            y: {
+                                ticks: {
+                                    color: '#4a5568',
+                                    font: { family: 'JetBrains Mono', size: 10 },
+                                    callback: v => (v > 0 ? '+' : '') + v + '%',
+                                },
+                                grid: { color: 'rgba(99,179,237,0.06)' },
+                            },
+                        },
+                    },
+                });
+            }
+
+            document.getElementById('show-index').onchange = refreshChart;
+            document.getElementById('show-inflation').onchange = refreshChart;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Rankings table
+        // ---------------------------------------------------------------------------
+        function renderRankingsTable(data) {
+            const fmt = v => v === null || v === undefined ? '—'
+                : `<span class="${v >= 0 ? 'positive' : 'negative'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
+
+            const rows = data.map(f => `
+        <tr>
+            <td>
+                <span class="mono" style="color:#c8d6e8;">${f.fund_ticker}</span>
+                <div style="font-size:11px; color:#4a5568; margin-top:2px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.fund_name || ''}</div>
+            </td>
+            <td class="mono">${fmt(f.cumulative_nominal)}</td>
+            <td class="mono">${fmt(f.cumulative_real)}</td>
+            <td>
+                <button class="btn" style="padding:3px 8px; font-size:11px;"
+                    onclick="toggleTicker('${f.fund_ticker}')">
+                    ${activeTickers.includes(f.fund_ticker) ? '✓' : '+'}
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+            document.getElementById('rankings-table').innerHTML = `
+        <table>
+            <thead><tr>
+                <th>Фонд</th>
+                <th>Номинально</th>
+                <th>Реально</th>
+                <th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Ticker chips and search
+        // ---------------------------------------------------------------------------
+        function renderChips() {
+            document.getElementById('ticker-chips').innerHTML = activeTickers.map(t => `
+        <span class="ticker-chip">
+            ${t}
+            <span class="remove" onclick="removeTicker('${t}')">×</span>
+        </span>
+    `).join('');
+        }
+
+        async function toggleTicker(ticker) {
+            if (activeTickers.includes(ticker)) {
+                activeTickers = activeTickers.filter(t => t !== ticker);
+            } else {
+                activeTickers.push(ticker);
+            }
+            renderChips();
+            // Re-render table so button states update
+            const params = new URLSearchParams({ months: currentMonths || 12, limit: 10 });
+            const res = await fetch(`/api/top-funds?${params}`);
+            renderRankingsTable(await res.json());
+            if (activeTickers.length > 0) await refreshChart();
+            else if (chart) { chart.data.datasets = []; chart.update(); }
+        }
+
+        async function removeTicker(ticker) {
+            activeTickers = activeTickers.filter(t => t !== ticker);
+            renderChips();
+            const params = new URLSearchParams({ months: currentMonths || 12, limit: 10 });
+            const res = await fetch(`/api/top-funds?${params}`);
+            renderRankingsTable(await res.json());
+            if (activeTickers.length > 0) await refreshChart();
+            else if (chart) { chart.data.datasets = []; chart.update(); }
+        }
+
+        function setupSearch() {
+            const input = document.getElementById('ticker-search');
+            const list = document.getElementById('autocomplete');
+
+            input.addEventListener('input', () => {
+                const q = input.value.trim().toUpperCase();
+                if (!q) { list.style.display = 'none'; return; }
+
+                const matches = allFunds.filter(f =>
+                    f.fund_ticker.includes(q) ||
+                    (f.fund_name || '').toUpperCase().includes(q)
+                ).slice(0, 8);
+
+                if (!matches.length) { list.style.display = 'none'; return; }
+
+                list.innerHTML = matches.map(f => `
+            <div class="autocomplete-item" onclick="selectTicker('${f.fund_ticker}')">
+                <span>${f.fund_ticker}</span>
+                <span class="name">${f.fund_name || ''}</span>
+            </div>
+        `).join('');
+                list.style.display = 'block';
+            });
+
+            document.addEventListener('click', e => {
+                if (!input.contains(e.target) && !list.contains(e.target)) {
+                    list.style.display = 'none';
+                }
+            });
+        }
+
+        async function selectTicker(ticker) {
+            document.getElementById('ticker-search').value = '';
+            document.getElementById('autocomplete').style.display = 'none';
+            if (!activeTickers.includes(ticker)) {
+                activeTickers.push(ticker);
+                renderChips();
+                await refreshChart();
+            }
+        }
+
+        // ---------------------------------------------------------------------------
+        // Calculator
+        // ---------------------------------------------------------------------------
+        function setupCalculator() {
+            // Default dates
+            const to = new Date();
+            const from = new Date();
+            from.setFullYear(from.getFullYear() - 1);
+            document.getElementById('calc-to').value = to.toISOString().slice(0, 10);
+            document.getElementById('calc-from').value = from.toISOString().slice(0, 10);
+
+            document.getElementById('calc-btn').addEventListener('click', runCalculator);
+        }
+
+        async function runCalculator() {
+            const ticker = document.getElementById('calc-ticker').value.trim().toUpperCase();
+            const amount = parseFloat(document.getElementById('calc-amount').value);
+            const from = document.getElementById('calc-from').value;
+            const to = document.getElementById('calc-to').value;
+
+            const errEl = document.getElementById('calc-error');
+            const resEl = document.getElementById('calc-result');
+
+            errEl.style.display = 'none';
+            resEl.style.display = 'none';
+
+            if (!ticker || !amount || !from || !to) {
+                errEl.textContent = 'Заполните все поля';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                const params = new URLSearchParams({ ticker, amount, from, to });
+                const res = await fetch(`/api/calculator?${params}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Ошибка запроса');
+                }
+                const data = await res.json();
+
+                const fmt = v => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(v);
+                const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
+                const cl = v => v >= 0 ? 'accent-green' : 'accent-red';
+
+                document.getElementById('result-nominal').className = `stat-value ${cl(data.cumulative_nominal)}`;
+                document.getElementById('result-nominal').textContent = fmt(data.nominal_final_value);
+                document.getElementById('result-nominal-pct').textContent = pct(data.cumulative_nominal);
+
+                document.getElementById('result-real').className = `stat-value ${cl(data.cumulative_real)}`;
+                document.getElementById('result-real').textContent = fmt(data.real_final_value);
+                document.getElementById('result-real-pct').textContent = pct(data.cumulative_real);
+
+                document.getElementById('result-meta').textContent =
+                    `${ticker} · ${data.months_count} мес · ${from} — ${to}`;
+
+                resEl.style.display = 'block';
+            } catch (e) {
+                errEl.textContent = e.message;
+                errEl.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+
+</html>

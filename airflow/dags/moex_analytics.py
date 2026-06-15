@@ -45,13 +45,13 @@ with DAG(
     # Task 1: Fetch macro indicators (Inflation YoY / Key Rate) from Central Bank SOAP service
     ingest_cbr_macro = BashOperator(
         task_id='ingest_cbr_macro',
-        bash_command='python /opt/airflow/ingestion/cbr.py macro --from-date 2024-01-01',
+        bash_command='python /opt/airflow/ingestion/cbr.py macro --from-date 2018-01-01',
     )
 
     # Task 2: Fetch historical daily values for the benchmark IMOEX index
     ingest_moex_index_prices = BashOperator(
         task_id='ingest_moex_index_prices',
-        bash_command='python /opt/airflow/ingestion/moex.py index-prices --from-date 2024-01-01',
+        bash_command='python /opt/airflow/ingestion/moex.py index-prices --from-date 2018-01-01',
     )
 
     # Task 3: Refresh the baseline reference registry of allowed mutual funds and ETFs
