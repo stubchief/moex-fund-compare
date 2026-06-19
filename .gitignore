@@ -1,6 +1,6 @@
 venv/
 .env
-__pycache__/
+*/__pycache__/
 *.pyc
 
 /logs/
@@ -13,3 +13,11 @@ dbt/dbt_packages/
 
 airflow/logs/*
 !airflow/logs/.gitkeep
+
+key.json
+
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/key.json

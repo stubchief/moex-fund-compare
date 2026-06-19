@@ -16,14 +16,13 @@ x-airflow-common: &airflow-common
     - ./dbt:/opt/airflow/dbt
     - ./ingestion:/opt/airflow/ingestion
     - ./airflow/dags:/opt/airflow/dags
-    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow_logs:/opt/airflow/logs
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
       condition: service_healthy
 
 services:
-  # Database service hosting both Airflow metadata and ETF DWH
   postgres:
     image: postgres:15-alpine
     environment:
@@ -32,7 +31,6 @@ services:
       - POSTGRES_DB=airflow_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Mount entire SQL folder; scripts execute in alphabetical order
       - ./infra/sql:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
@@ -42,29 +40,69 @@ services:
       timeout: 5s
       retries: 5
 
-  # Web interface service (handles its own database initialization)
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    user: "0:0"
+    command:
+          - -c
+          - |
+            mkdir -p /opt/airflow/dags /opt/airflow/logs
+            chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/dags /opt/airflow/logs
+            airflow db init
+            airflow users create \
+              --username admin --firstname Admin --lastname User \
+              --role Admin --email admin@example.com --password admin || true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   airflow-webserver:
     <<: *airflow-common
+    command: webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 10s
-      timeout: 10s
+      timeout: 5s
       retries: 5
     restart: always
-    command: >
-          bash -c "
-          airflow db init &&
-          airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin || true &&
-          exec airflow webserver
-          "
 
-  # Background scheduler service responsible for triggering pipelines
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
     restart: always
+
+  airflow-trigger:
+    <<: *airflow-common
+    container_name: airflow-trigger
+    user: "${AIRFLOW_UID:-50000}:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        sleep 15
+        for i in $(seq 1 30); do
+          if airflow dags unpause moex_etf_pipeline && airflow dags trigger moex_etf_pipeline; then
+            echo "DAG unpaused and triggered successfully"
+            exit 0
+          fi
+          echo "Waiting for scheduler to register the DAG... ($i/30)"
+          sleep 5
+        done
+        echo "Could not trigger DAG after 30 attempts" >&2
+        exit 1
+    depends_on:
+      airflow-scheduler:
+        condition: service_started
 
   api:
     build:
@@ -80,3 +118,4 @@ services:
 
 volumes:
   postgres_data:
+  airflow_logs:

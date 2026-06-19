@@ -1,0 +1,50 @@
+#cloud-config
+# infra/terraform/cloud-init.yaml.tftpl
+#
+# Runs once on first boot:
+#   1. Installs Docker + Docker Compose plugin and git
+#   2. Writes .env using values passed in from Terraform variables
+#   3. Clones the project repo
+#   4. Starts the full stack with `docker compose up --build -d`
+#
+# This only automates the FIRST deploy. Future code changes still
+# require a manual redeploy on the VM (see README "Updating the
+# deployment") - there is no CI/CD watching the repo.
+
+package_update: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+
+write_files:
+  - path: /tmp/moex-etf.env
+    permissions: '0600'
+    content: |
+      POSTGRES_USER=${postgres_user}
+      POSTGRES_PASSWORD=${postgres_password}
+      POSTGRES_DB=${postgres_db}
+      AIRFLOW_UID=${airflow_uid}
+
+runcmd:
+  # --- Docker ---
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - usermod -aG docker ubuntu
+
+# --- Project ---
+  - git clone ${repo_url} /opt/moex-etf
+  - mv /tmp/moex-etf.env /opt/moex-etf/.env
+  - mkdir -p /opt/moex-etf/airflow/dags
+  - mkdir -p /opt/moex-etf/airflow/logs
+  - chown -R 50000:0 /opt/moex-etf/airflow/logs
+  - chown ubuntu:ubuntu /opt/moex-etf
+
+  # --- Start the stack ---
+  - cd /opt/moex-etf && docker compose up --build -d
