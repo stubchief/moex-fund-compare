@@ -7,6 +7,6 @@ dbt:
       port: 5432
       user: "{{ env_var('POSTGRES_USER') }}"
       pass: "{{ env_var('POSTGRES_PASSWORD') }}"
-      dbname: "{{ env_var('POSTGRES_DB') }}"
+      dbname: etf_db
       schema: analytics
       threads: 4

@@ -23,7 +23,8 @@ from airflow.operators.bash import BashOperator
 # Default configuration settings applied to all tasks
 default_args = {
     'owner': 'airflow',
-    'depends_on_past': False,
+    'depends_on_past': True,
+    'wait_for_downstream': True,
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
@@ -35,6 +36,7 @@ with DAG(
     schedule='@daily',
     start_date=datetime(2026, 1, 1),
     catchup=False,
+    max_active_runs=1,
     tags=['moex', 'cbr', 'dbt'],
 ) as dag:
 

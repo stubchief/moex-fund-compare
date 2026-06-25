@@ -288,6 +288,11 @@
                 <button class="period-btn" data-months="0">Всё</button>
             </div>
 
+            <!-- Синхронизация графика с текущим топом таблицы -->
+            <button class="btn" id="sync-top-btn" style="font-size: 11px; padding: 4px 10px; height: 34px;">
+                ← График в топ периода
+            </button>
+
             <!-- Ticker search -->
             <div style="position: relative;">
                 <input type="text" id="ticker-search" placeholder="Добавить фонд..." style="width: 200px;">
@@ -398,6 +403,7 @@
         let activeTickers = [];
         let currentMonths = 3;
         let chart = null;
+        let currentTopFunds = []; // Хранилище загруженного топа для мгновенной синхронизации
 
         const COLORS = [
             '#63b3ed', '#68d391', '#f6ad55', '#fc8181', '#b794f4',
@@ -413,6 +419,9 @@
             setupSearch();
             setupCalculator();
             await loadTopFunds(currentMonths);
+
+            // Навешиваем событие на кнопку синхронизации топа
+            document.getElementById('sync-top-btn').addEventListener('click', applyPeriodTopToChart);
         });
 
         // ---------------------------------------------------------------------------
@@ -446,13 +455,27 @@
             const res = await fetch(`/api/top-funds?${params}`);
             const data = await res.json();
 
-            // On first load set default tickers; on period change keep current selection
+            currentTopFunds = data; // Кэшируем полученный топ
+
+            // При первой загрузке (когда список пуст) берем топ-5
             if (activeTickers.length === 0) {
                 activeTickers = data.slice(0, 5).map(f => f.fund_ticker);
                 renderChips();
             }
             renderRankingsTable(data);
             await refreshChart();
+        }
+
+        // ---------------------------------------------------------------------------
+        // Принудительное выставление топ-5 фондов периода на график
+        // ---------------------------------------------------------------------------
+        function applyPeriodTopToChart() {
+            if (!currentTopFunds || currentTopFunds.length === 0) return;
+
+            activeTickers = currentTopFunds.slice(0, 5).map(f => f.fund_ticker);
+            renderChips();
+            renderRankingsTable(currentTopFunds); // Обновит отметки "✓" в таблице
+            refreshChart();
         }
 
         // ---------------------------------------------------------------------------
@@ -662,10 +685,7 @@
                 activeTickers.push(ticker);
             }
             renderChips();
-            // Re-render table so button states update
-            const params = new URLSearchParams({ months: currentMonths || 12, limit: 10 });
-            const res = await fetch(`/api/top-funds?${params}`);
-            renderRankingsTable(await res.json());
+            renderRankingsTable(currentTopFunds);
             if (activeTickers.length > 0) await refreshChart();
             else if (chart) { chart.data.datasets = []; chart.update(); }
         }
@@ -673,9 +693,7 @@
         async function removeTicker(ticker) {
             activeTickers = activeTickers.filter(t => t !== ticker);
             renderChips();
-            const params = new URLSearchParams({ months: currentMonths || 12, limit: 10 });
-            const res = await fetch(`/api/top-funds?${params}`);
-            renderRankingsTable(await res.json());
+            renderRankingsTable(currentTopFunds);
             if (activeTickers.length > 0) await refreshChart();
             else if (chart) { chart.data.datasets = []; chart.update(); }
         }
@@ -717,6 +735,7 @@
             if (!activeTickers.includes(ticker)) {
                 activeTickers.push(ticker);
                 renderChips();
+                renderRankingsTable(currentTopFunds);
                 await refreshChart();
             }
         }

@@ -4,7 +4,7 @@ ingestion/moex.py
 Fetches data from MOEX ISS API and writes it to the raw schema in PostgreSQL.
 
 Three public functions:
-    fetch_fund_list()                          - fund reference data (TQTF board)
+    fetch_fund_list()                          - fund reference data (Shares market)
     fetch_fund_prices(secid, from_date, to_date) - daily OHLCV prices for a fund
     fetch_index_prices(from_date, to_date)       - daily IMOEX index values
 
@@ -39,7 +39,7 @@ RETRY_DELAY = 5      # seconds before retrying a failed request
 
 
 # ---------------------------------------------------------------------------
-# HTTP client
+# HTTP client & Helpers
 # ---------------------------------------------------------------------------
 
 def _get(url: str, params: dict) -> dict:
@@ -50,10 +50,13 @@ def _get(url: str, params: dict) -> dict:
     and iss.meta=off (meta block is empty, structure stays the same).
     """
     params = {**params, "iss.json": "extended", "iss.meta": "off"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = requests.get(url, params=params, timeout=30)
+            response = requests.get(url, params=params, headers=headers, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
@@ -62,6 +65,19 @@ def _get(url: str, params: dict) -> dict:
                 time.sleep(RETRY_DELAY)
             else:
                 raise
+
+
+def _get_block(data, block_name: str) -> list:
+    """
+    Safely extracts the specific data block from MOEX extended JSON array.
+    """
+    if isinstance(data, list):
+        for block in data:
+            if isinstance(block, dict) and block_name in block:
+                return block[block_name]
+    elif isinstance(data, dict) and block_name in data:
+        return data[block_name]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -80,41 +96,51 @@ def _get_connection():
 
 def fetch_fund_list() -> int:
     """
-    Fetches the reference list of mutual funds and ETFs from the TQTF board.
-
-    Full overwrite on every run - the list is small (~100-150 rows)
-    and we always want it to reflect the current state of the board.
-
-    Returns:
-        Number of rows written.
+    Fetches the reference list of mutual funds and ETFs from the entire shares market.
     """
-    url = f"{BASE_URL}/engines/stock/markets/shares/boards/TQTF/securities.json"
+    # Переключаемся на глобальный эндпоинт рынка акций, так как доска TQTF упразднена
+    url = f"{BASE_URL}/engines/stock/markets/shares/securities.json"
     params = {
         "iss.only": "securities",
         "securities.columns": "SECID,SECNAME,SHORTNAME,ISIN,LISTLEVEL",
     }
 
-    logger.info("Fetching fund list from TQTF board")
+    logger.info("Fetching fund list from MOEX shares market")
     data = _get(url, params)
 
-    # With iss.json=extended ISS returns [meta, data].
-    # data[1] is a dict of block_name -> list of row dicts.
-    rows = data[1].get("securities", [])
-
-    if not rows:
+    raw_rows = _get_block(data, "securities")
+    if not raw_rows:
         logger.warning("fund_list: empty response")
         return 0
 
-    records = [
-        (
-            row.get("SECID"),
-            row.get("SECNAME"),
-            row.get("SHORTNAME"),
-            row.get("ISIN"),
-            str(row.get("LISTLEVEL")) if row.get("LISTLEVEL") is not None else None,
-        )
-        for row in rows
-    ]
+    # Нормализуем ключи к нижнему регистру
+    rows = [{k.lower(): v for k, v in r.items()} for r in raw_rows]
+
+    # Маркеры для точечного отбора фондов (ETF, БПИФ, ЗПИФ, Паи) из общей массы акций
+    keywords = ["etf", "бпиф", "ипиф", "зпиф", "фонд", "пай"]
+
+    records = []
+    for row in rows:
+        if not row.get("secid"):
+            continue
+
+        # Проверяем, что бумага является фондом
+        secname = str(row.get("secname", "")).lower()
+        shortname = str(row.get("shortname", "")).lower()
+        if not any(k in secname or k in shortname for k in keywords):
+            continue
+
+        records.append((
+            row.get("secid"),
+            row.get("secname"),
+            row.get("shortname"),
+            row.get("isin"),
+            str(row.get("listlevel")) if row.get("listlevel") is not None else None,
+        ))
+
+    if not records:
+        logger.warning("fund_list: no valid records after filtering")
+        return 0
 
     with _get_connection() as conn:
         with conn.cursor() as cur:
@@ -144,24 +170,11 @@ def fetch_fund_prices(
 ) -> int:
     """
     Fetches daily OHLCV prices for a single fund across all boards.
-
-    Using the global /history/securities/ endpoint instead of specific boards
-    because funds frequently switch major trading boards (e.g., TQTF to TQBR).
-
-    Args:
-        secid:     Fund ticker, e.g. 'SBSP'.
-        from_date: Start of period, 'YYYY-MM-DD'.
-        to_date:   End of period, 'YYYY-MM-DD'. Defaults to yesterday.
-
-    Returns:
-        Number of rows written.
     """
     if to_date is None:
         to_date = str(date.today() - timedelta(days=1))
 
-    # CHANGED: Using universal history endpoint instead of explicit engine/market/board
     url = f"{BASE_URL}/history/engines/stock/markets/shares/securities/{secid}.json"
-    
     params = {
         "from": from_date,
         "till": to_date,
@@ -175,21 +188,26 @@ def fetch_fund_prices(
 
     while True:
         data = _get(url, {**params, "start": start})
-        rows = data[1].get("history", [])
+        raw_rows = _get_block(data, "history")
 
-        if not rows:
+        if not raw_rows:
             break
 
+        # Нормализуем ключи к нижнему регистру
+        rows = [{k.lower(): v for k, v in r.items()} for r in raw_rows]
+
         for row in rows:
+            if not row.get("tradedate"):
+                continue
             all_records.append((
-                row.get("SECID") or secid,
-                row.get("TRADEDATE"),
-                _to_str(row.get("OPEN")),
-                _to_str(row.get("HIGH")),
-                _to_str(row.get("LOW")),
-                _to_str(row.get("CLOSE")),
-                _to_str(row.get("VOLUME")),
-                _to_str(row.get("VALUE")),
+                row.get("secid") or secid,
+                row.get("tradedate"),
+                _to_str(row.get("open")),
+                _to_str(row.get("high")),
+                _to_str(row.get("low")),
+                _to_str(row.get("close")),
+                _to_str(row.get("volume")),
+                _to_str(row.get("value")),
             ))
 
         logger.debug("%s: fetched page start=%d, got %d rows", secid, start, len(rows))
@@ -219,15 +237,6 @@ def fetch_index_prices(
 ) -> int:
     """
     Fetches daily values of the IMOEX index.
-
-    Indexes live under engine=stock, market=index, board=SNDX.
-
-    Args:
-        from_date: Start of period, 'YYYY-MM-DD'.
-        to_date:   End of period, 'YYYY-MM-DD'. Defaults to yesterday.
-
-    Returns:
-        Number of rows written.
     """
     if to_date is None:
         to_date = str(date.today() - timedelta(days=1))
@@ -249,21 +258,26 @@ def fetch_index_prices(
 
     while True:
         data = _get(url, {**params, "start": start})
-        rows = data[1].get("history", [])
+        raw_rows = _get_block(data, "history")
 
-        if not rows:
+        if not raw_rows:
             break
 
+        # Нормализуем ключи к нижнему регистру
+        rows = [{k.lower(): v for k, v in r.items()} for r in raw_rows]
+
         for row in rows:
+            if not row.get("tradedate"):
+                continue
             all_records.append((
                 "IMOEX",
-                row.get("TRADEDATE"),
-                _to_str(row.get("OPEN")),
-                _to_str(row.get("HIGH")),
-                _to_str(row.get("LOW")),
-                _to_str(row.get("CLOSE")),
-                _to_str(row.get("VOLUME")),
-                _to_str(row.get("VALUE")),
+                row.get("tradedate"),
+                _to_str(row.get("open")),
+                _to_str(row.get("high")),
+                _to_str(row.get("low")),
+                _to_str(row.get("close")),
+                _to_str(row.get("volume")),
+                _to_str(row.get("value")),
             ))
 
         if len(rows) < PAGE_SIZE:
@@ -310,7 +324,7 @@ def _insert_prices(table: str, records: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI - for local testing and manual backfills
+# CLI
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":

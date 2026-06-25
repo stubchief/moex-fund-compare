@@ -38,13 +38,12 @@ runcmd:
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   - usermod -aG docker ubuntu
 
-# --- Project ---
+  # --- Project ---
   - git clone ${repo_url} /opt/moex-etf
   - mv /tmp/moex-etf.env /opt/moex-etf/.env
   - mkdir -p /opt/moex-etf/airflow/dags
-  - mkdir -p /opt/moex-etf/airflow/logs
-  - chown -R 50000:0 /opt/moex-etf/airflow/logs
-  - chown ubuntu:ubuntu /opt/moex-etf
+  - chown -R ubuntu:ubuntu /opt/moex-etf
+  - chmod -R 777 /opt/moex-etf/dbt
 
   # --- Start the stack ---
   - cd /opt/moex-etf && docker compose up --build -d
