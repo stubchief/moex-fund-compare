@@ -1,15 +1,23 @@
-# infra/terraform/main.tf
-#
-# Provisions a single Compute Cloud VM that runs the entire stack
-# via Docker Compose. No managed services (DB, k8s) - the project's
-# scale doesn't justify them. See README "Key Design Decisions".
-
 terraform {
   required_providers {
     yandex = {
       source  = "yandex-cloud/yandex"
       version = "~> 0.130"
     }
+  }
+
+  backend "s3" {
+    endpoints = {
+      s3 = "https://storage.yandexcloud.net"
+    }
+    bucket                      = "moex-fund-compare-tfstate"
+    key                         = "terraform.tfstate"
+    region                      = "ru-central1"
+
+    skip_region_validation      = true
+    skip_credentials_validation = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
   }
 }
 
@@ -35,7 +43,7 @@ resource "yandex_vpc_subnet" "etf_subnet" {
 }
 
 # -----------------------------------------------------------------------
-# Security group: open only what the stack actually exposes
+# Security group
 # -----------------------------------------------------------------------
 
 resource "yandex_vpc_security_group" "etf_sg" {
@@ -65,7 +73,7 @@ resource "yandex_vpc_security_group" "etf_sg" {
 
   egress {
     protocol       = "ANY"
-    description    = "Allow all outbound (MOEX/CBR API calls, package installs)"
+    description    = "Allow all outbound"
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -104,9 +112,6 @@ resource "yandex_compute_instance" "etf_vm" {
 
   metadata = {
     ssh-keys = "ubuntu:${file(var.ssh_public_key_path)}"
-    # Generates .env on the VM and runs `docker compose up --build -d`
-    # on first boot. Only the FIRST deploy is automated this way -
-    # later code changes still require a manual redeploy on the VM.
     user-data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
       postgres_user     = var.postgres_user
       postgres_password = var.postgres_password

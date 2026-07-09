@@ -36,7 +36,7 @@ Terraform      — VM provisioning (Yandex Cloud)
 
 ## Stack
 
-Python ingestion · Airflow 2.10 · PostgreSQL 15 · dbt Core 1.8 · FastAPI · vanilla JS + Chart.js + Tailwind · Docker Compose · Terraform
+Python ingestion · Airflow 2.10 · PostgreSQL 15 · dbt Core 1.8 · FastAPI · vanilla JS + Chart.js + Tailwind · Docker Compose · Terraform  · GitHub Actions CI/CD
 
 ## Data sources
 
@@ -52,7 +52,9 @@ moex-fund-compare/
 ├── ingestion/
 │   ├── moex.py
 │   ├── cbr.py
-│   └── fetch_all_prices.py
+│   ├── fetch_all_prices.py
+│   └── tests/
+│       └── test_smoke.py
 ├── dbt/
 │   └── models/{staging,mart}/
 ├── airflow/dags/moex_analytics.py
@@ -66,7 +68,11 @@ moex-fund-compare/
 │   ├── sql/
 │   └── terraform/
 ├── docker-compose.yml
-└── .env.example
+├── .env.example
+└── .github
+    └── workflows/
+        └── deploy.yaml
+
 ```
 
 ## Running locally
@@ -100,34 +106,49 @@ AIRFLOW_UID=50000
 
 ## Deployment
 
-Terraform support currently targets **Yandex Cloud only**. It provisions a single VM and, via `cloud-init`, also runs the first deploy: generates `.env` on the VM, clones this repo, runs `docker compose up --build -d`, then unpauses and triggers the DAG.
+Terraform provisions a single VM on Yandex Cloud and via `cloud-init` runs the first deploy.
+State is stored remotely in Yandex Object Storage.
 
-`.env` additionally needs, for Terraform:
+### One-time setup
 
+1. Create a Yandex Object Storage bucket for Terraform state (private, versioning enabled).
+
+2. Run bootstrap to create a Terraform service account:
 ```bash
-TF_VAR_folder_id=                 # `yc config list`
-TF_VAR_ssh_public_key_path=       # e.g. /home/you/.ssh/id_rsa.pub
-TF_VAR_postgres_user=airflow      # same as POSTGRES_USER above
-TF_VAR_postgres_password=airflow  # same as POSTGRES_PASSWORD above
+   bash infra/bootstrap.sh
 ```
 
-```bash
-# one-time: service account for Terraform (reads TF_VAR_folder_id from .env)
-./infra/bootstrap.sh
+3. Create a static access key for the service account in the Yandex Cloud console
+   (IAM → Service accounts → terraform-sa → Static access keys).
 
-# provision — must source .env first, terraform reads TF_VAR_* from the environment
+4. Add the following secrets to the GitHub repository
+   (Settings → Secrets and variables → Actions):
+
+   | Secret | Description |
+   |---|---|
+   | `YC_KEY_JSON` | Contents of `infra/terraform/key.json` |
+   | `YC_FOLDER_ID` | Yandex Cloud folder ID |
+   | `SSH_PRIVATE_KEY` | Private SSH key (for VM access) |
+   | `AWS_ACCESS_KEY_ID` | Object Storage static key ID (Terraform state) |
+   | `AWS_SECRET_ACCESS_KEY` | Object Storage static key secret |
+   | `TF_VAR_postgres_password` | PostgreSQL password |
+
+### Running
+
+Deployment is triggered manually via GitHub Actions (`workflow_dispatch`):
+- runs smoke tests against live APIs
+- lints with ruff
+- runs `terraform apply`
+- SSHes into the VM and runs `docker compose up --build -d`
+
+`vm_external_ip` is printed as a Terraform output and visible in the Actions log.
+Dashboard at `:8000`, Airflow at `:8080`.
+
+To provision manually without CI/CD:
+```bash
 set -a; source .env; set +a
 terraform -chdir=infra/terraform init
 terraform -chdir=infra/terraform apply
-```
-
-`vm_external_ip` comes out as a Terraform output. Give it a minute or two to finish building images, then hit `:8000` and `:8080` same as local.
-
-Nothing watches the repo for changes — `cloud-init` only runs on first boot. Redeploying after a code change is manual:
-
-```bash
-ssh ubuntu@<vm_external_ip>
-cd /opt/moex-etf && git pull && docker compose up --build -d
 ```
 
 ## API
